@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::mem;
 
 use crossfont::Metrics;
+use memoffset::offset_of;
 
-use alacritty_terminal::grid::Dimensions;
-use alacritty_terminal::index::{Column, Point};
+use alacritty_terminal::index::Point;
 use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Rgb;
 use alacritty_terminal::term::SizeInfo;
@@ -22,90 +22,106 @@ pub struct RenderRect {
     pub height: f32,
     pub color: Rgb,
     pub alpha: f32,
+    pub style: RectStyle,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum RectStyle {
+    /// Solid rectangle.
+    Solid,
+    /// Dashed rectangle (line).
+    /// `period` for the length of dash period (a dash and a gap).
+    Dashed { period: f32 },
 }
 
 impl RenderRect {
     pub fn new(x: f32, y: f32, width: f32, height: f32, color: Rgb, alpha: f32) -> Self {
-        RenderRect { x, y, width, height, color, alpha }
+        RenderRect { x, y, width, height, color, alpha, style: RectStyle::Solid }
+    }
+
+    pub fn new_with_style(
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: Rgb,
+        alpha: f32,
+        style: RectStyle,
+    ) -> Self {
+        RenderRect { x, y, width, height, color, alpha, style }
     }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct RenderLine {
-    pub start: Point<usize>,
-    pub end: Point<usize>,
-    pub color: Rgb,
+struct RenderLine {
+    start: Point<usize>,
+    end: Point<usize>,
+    color: Rgb,
 }
 
 impl RenderLine {
-    pub fn rects(&self, flag: Flags, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
-        let mut rects = Vec::new();
+    fn rects(&self, flag: Flags, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
+        // This method is only called after underline join in `RenderLines::update_flags`,
+        // which only join underlines on the same line.
+        debug_assert_eq!(self.start.line, self.end.line);
 
-        let mut start = self.start;
-        while start.line < self.end.line {
-            let end = Point::new(start.line, size.last_column());
-            Self::push_rects(&mut rects, metrics, size, flag, start, end, self.color);
-            start = Point::new(start.line + 1, Column(0));
-        }
-        Self::push_rects(&mut rects, metrics, size, flag, start, self.end, self.color);
+        let mut rects = Vec::with_capacity(2);
 
-        rects
-    }
-
-    /// Push all rects required to draw the cell's line.
-    fn push_rects(
-        rects: &mut Vec<RenderRect>,
-        metrics: &Metrics,
-        size: &SizeInfo,
-        flag: Flags,
-        start: Point<usize>,
-        end: Point<usize>,
-        color: Rgb,
-    ) {
-        let (position, thickness) = match flag {
+        let (position, thickness, style) = match flag {
             Flags::DOUBLE_UNDERLINE => {
                 // Position underlines so each one has 50% of descent available.
                 let top_pos = 0.25 * metrics.descent;
                 let bottom_pos = 0.75 * metrics.descent;
 
-                rects.push(Self::create_rect(
+                rects.push(self.create_rect(
                     size,
                     metrics.descent,
-                    start,
-                    end,
                     top_pos,
                     metrics.underline_thickness,
-                    color,
+                    RectStyle::Solid,
                 ));
 
-                (bottom_pos, metrics.underline_thickness)
+                (bottom_pos, metrics.underline_thickness, RectStyle::Solid)
             },
-            Flags::UNDERLINE => (metrics.underline_position, metrics.underline_thickness),
-            Flags::STRIKEOUT => (metrics.strikeout_position, metrics.strikeout_thickness),
+            Flags::UNDERLINE => {
+                (metrics.underline_position, metrics.underline_thickness, RectStyle::Solid)
+            },
+            Flags::STRIKEOUT => {
+                (metrics.strikeout_position, metrics.strikeout_thickness, RectStyle::Solid)
+            },
+            Flags::DOTTED_UNDERLINE => {
+                // The dash width (half period) must be at least 1px and should be multiple
+                // of px, or it will be visually inconsistent.
+                let period = metrics.underline_thickness.round().max(1.) * 2.;
+                let style = RectStyle::Dashed { period };
+                (metrics.underline_position, metrics.underline_thickness, style)
+            },
+            Flags::DASHED_UNDERLINE => {
+                // Should this be configurable?
+                let dash_width = size.cell_width() / 4.;
+                // Same reason as DOTTED_UNDERLINE. But this should at least longer than it.
+                let period = dash_width.round().max(2.) * 2.;
+                let style = RectStyle::Dashed { period };
+                (metrics.underline_position, metrics.underline_thickness, style)
+            },
             _ => unimplemented!("Invalid flag for cell line drawing specified"),
         };
 
-        rects.push(Self::create_rect(
-            size,
-            metrics.descent,
-            start,
-            end,
-            position,
-            thickness,
-            color,
-        ));
+        rects.push(self.create_rect(size, metrics.descent, position, thickness, style));
+
+        rects
     }
 
     /// Create a line's rect at a position relative to the baseline.
     fn create_rect(
+        &self,
         size: &SizeInfo,
         descent: f32,
-        start: Point<usize>,
-        end: Point<usize>,
         position: f32,
         mut thickness: f32,
-        color: Rgb,
+        style: RectStyle,
     ) -> RenderRect {
+        let Self { start, end, color } = *self;
         let start_x = start.column.0 as f32 * size.cell_width();
         let end_x = (end.column.0 + 1) as f32 * size.cell_width();
         let width = end_x - start_x;
@@ -122,13 +138,14 @@ impl RenderLine {
             y = max_y;
         }
 
-        RenderRect::new(
+        RenderRect::new_with_style(
             start_x + size.padding_x(),
             y + size.padding_y(),
             width,
             thickness,
             color,
             1.,
+            style,
         )
     }
 }
@@ -161,6 +178,8 @@ impl RenderLines {
         self.update_flag(cell, Flags::UNDERLINE);
         self.update_flag(cell, Flags::DOUBLE_UNDERLINE);
         self.update_flag(cell, Flags::STRIKEOUT);
+        self.update_flag(cell, Flags::DOTTED_UNDERLINE);
+        self.update_flag(cell, Flags::DASHED_UNDERLINE);
     }
 
     /// Update the lines for a specific flag.
@@ -214,6 +233,10 @@ struct Vertex {
     g: u8,
     b: u8,
     a: u8,
+
+    // The period of dashes.
+    // For solid rect, this is set to a large enough value.
+    dash_period: f32,
 }
 
 #[derive(Debug)]
@@ -243,30 +266,41 @@ impl RectRenderer {
             // VBO binding is not part of VAO itself, but VBO binding is stored in attributes.
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
 
-            let mut attribute_offset = 0;
-
             // Position.
+            // [x, y], r, g, b, a, dash_period
             gl::VertexAttribPointer(
                 0,
                 2,
                 gl::FLOAT,
                 gl::FALSE,
                 mem::size_of::<Vertex>() as i32,
-                attribute_offset as *const _,
+                offset_of!(Vertex, x) as *const _,
             );
             gl::EnableVertexAttribArray(0);
-            attribute_offset += mem::size_of::<f32>() * 2;
 
             // Color.
+            // x, y, [r, g, b, a], dash_period
             gl::VertexAttribPointer(
                 1,
                 4,
                 gl::UNSIGNED_BYTE,
                 gl::TRUE,
                 mem::size_of::<Vertex>() as i32,
-                attribute_offset as *const _,
+                offset_of!(Vertex, r) as *const _,
             );
             gl::EnableVertexAttribArray(1);
+
+            // Dash period.
+            // x, y, r, g, b, a, [dash_period]
+            gl::VertexAttribPointer(
+                2,
+                1,
+                gl::FLOAT,
+                gl::FALSE,
+                mem::size_of::<Vertex>() as i32,
+                offset_of!(Vertex, dash_period) as *const _,
+            );
+            gl::EnableVertexAttribArray(2);
 
             // Reset buffer bindings.
             gl::BindVertexArray(0);
@@ -326,21 +360,32 @@ impl RectRenderer {
         let height = rect.height / half_height;
         let Rgb { r, g, b } = rect.color;
         let a = (rect.alpha * 255.) as u8;
+        let dash_period = match rect.style {
+            // To make it all solid in viewport, simply set period to a number greater than
+            // 2 times the viewport size 2.0 (from -1 to +1),
+            RectStyle::Solid => 2. * 2.,
+            RectStyle::Dashed { period } => period / half_width,
+        };
 
         // Make quad vertices.
+        // ^y   0 - 2
+        // |    | / |
+        // ->x  1 - 3
         let quad = [
-            Vertex { x, y, r, g, b, a },
-            Vertex { x, y: y - height, r, g, b, a },
-            Vertex { x: x + width, y, r, g, b, a },
-            Vertex { x: x + width, y: y - height, r, g, b, a },
+            Vertex { x, y, r, g, b, a, dash_period },
+            Vertex { x, y: y - height, r, g, b, a, dash_period },
+            Vertex { x: x + width, y, r, g, b, a, dash_period },
+            Vertex { x: x + width, y: y - height, r, g, b, a, dash_period },
         ];
 
         // Append the vertices to form two triangles.
+        // The order matters! Dotted line shader relies on a specific provoking vertex (the last
+        // one by default).
+        self.vertices.push(quad[2]);
         self.vertices.push(quad[0]);
         self.vertices.push(quad[1]);
-        self.vertices.push(quad[2]);
-        self.vertices.push(quad[2]);
         self.vertices.push(quad[3]);
+        self.vertices.push(quad[2]);
         self.vertices.push(quad[1]);
     }
 }
