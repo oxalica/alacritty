@@ -24,6 +24,9 @@ bitflags! {
         const STRIKEOUT                 = 0b0000_0010_0000_0000;
         const LEADING_WIDE_CHAR_SPACER  = 0b0000_0100_0000_0000;
         const DOUBLE_UNDERLINE          = 0b0000_1000_0000_0000;
+        const DOTTED_UNDERLINE          = 0b0001_0000_0000_0000;
+        const DASHED_UNDERLINE          = 0b0010_0000_0000_0000;
+        const ALL_UNDERLINE             = 0b0011_1000_0000_1000;
     }
 }
 
@@ -117,8 +120,7 @@ impl GridCell for Cell {
             && self.fg == Color::Named(NamedColor::Foreground)
             && !self.flags.intersects(
                 Flags::INVERSE
-                    | Flags::UNDERLINE
-                    | Flags::DOUBLE_UNDERLINE
+                    | Flags::ALL_UNDERLINE
                     | Flags::STRIKEOUT
                     | Flags::WRAPLINE
                     | Flags::WIDE_CHAR_SPACER
