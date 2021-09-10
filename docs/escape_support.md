@@ -65,7 +65,8 @@ brevity.
 | `CSI l`    | PARTIAL     | See `CSI h` for supported modes                   |
 | `CSI ? l`  | PARTIAL     | See `CSI ? h` for supported modes                 |
 | `CSI M`    | IMPLEMENTED |                                                   |
-| `CSI m`    | PARTIAL     | Only singular straight underlines are supported   |
+| `CSI m`    | PARTIAL     | Supported underlines:                             |
+|            |             |   `4`, `4:1`, `4:2`, `4:4`, `4:5`                 |
 | `CSI n`    | IMPLEMENTED |                                                   |
 | `CSI P`    | IMPLEMENTED |                                                   |
 | `CSI SP q` | IMPLEMENTED |                                                   |
