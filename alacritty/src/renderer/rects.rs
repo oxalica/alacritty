@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use std::mem;
 
 use crossfont::Metrics;
+use enum_map::{Enum, EnumMap};
 use memoffset::offset_of;
 
 use alacritty_terminal::index::Point;
@@ -65,60 +65,8 @@ struct RenderLine {
 }
 
 impl RenderLine {
-    fn rects(&self, flag: Flags, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
-        // This method is only called after underline join in `RenderLines::update_flags`,
-        // which only join underlines on the same line.
-        debug_assert_eq!(self.start.line, self.end.line);
-
-        let mut rects = Vec::with_capacity(2);
-
-        let (position, thickness, style) = match flag {
-            Flags::DOUBLE_UNDERLINE => {
-                // Position underlines so each one has 50% of descent available.
-                let top_pos = 0.25 * metrics.descent;
-                let bottom_pos = 0.75 * metrics.descent;
-
-                rects.push(self.create_rect(
-                    size,
-                    metrics.descent,
-                    top_pos,
-                    metrics.underline_thickness,
-                    RectStyle::Solid,
-                ));
-
-                (bottom_pos, metrics.underline_thickness, RectStyle::Solid)
-            },
-            Flags::UNDERLINE => {
-                (metrics.underline_position, metrics.underline_thickness, RectStyle::Solid)
-            },
-            Flags::STRIKEOUT => {
-                (metrics.strikeout_position, metrics.strikeout_thickness, RectStyle::Solid)
-            },
-            Flags::DOTTED_UNDERLINE => {
-                // The dash width (half period) must be at least 1px and should be multiple
-                // of px, or it will be visually inconsistent.
-                let period = metrics.underline_thickness.round().max(1.) * 2.;
-                let style = RectStyle::Dashed { period };
-                (metrics.underline_position, metrics.underline_thickness, style)
-            },
-            Flags::DASHED_UNDERLINE => {
-                let dash_width = size.cell_width() / (DASH_PERIODS_PER_CELL * 2.);
-                // Same reason as DOTTED_UNDERLINE.
-                // But this should longer than dotted one, so set to at least 2px.
-                let period = dash_width.round().max(2.) * 2.;
-                let style = RectStyle::Dashed { period };
-                (metrics.underline_position, metrics.underline_thickness, style)
-            },
-            _ => unimplemented!("Invalid flag for cell line drawing specified"),
-        };
-
-        rects.push(self.create_rect(size, metrics.descent, position, thickness, style));
-
-        rects
-    }
-
     /// Create a line's rect at a position relative to the baseline.
-    fn create_rect(
+    fn rect(
         &self,
         size: &SizeInfo,
         descent: f32,
@@ -158,7 +106,16 @@ impl RenderLine {
 /// Lines for underline and strikeout.
 #[derive(Default)]
 pub struct RenderLines {
-    inner: HashMap<Flags, Vec<RenderLine>>,
+    inner: EnumMap<LineKind, Vec<RenderLine>>,
+}
+
+#[derive(Debug, Clone, Copy, Enum)]
+enum LineKind {
+    StrikeOut,
+    SingleUnderline,
+    DoubleUnderline,
+    DottedUnderline,
+    DashedUnderline,
 }
 
 impl RenderLines {
@@ -167,28 +124,103 @@ impl RenderLines {
         Self::default()
     }
 
+    // Calculate positions of all lines and turn them into rects.
     #[inline]
     pub fn rects(&self, metrics: &Metrics, size: &SizeInfo) -> Vec<RenderRect> {
-        self.inner
-            .iter()
-            .flat_map(|(flag, lines)| {
-                lines.iter().flat_map(move |line| line.rects(*flag, metrics, size))
-            })
-            .collect()
+        let mut rects = Vec::new();
+
+        // Strike out line.
+        for line in &self.inner[LineKind::StrikeOut] {
+            rects.push(line.rect(
+                size,
+                metrics.descent,
+                metrics.strikeout_position,
+                metrics.strikeout_thickness,
+                RectStyle::Solid,
+            ));
+        }
+
+        // Single underline.
+        for line in &self.inner[LineKind::SingleUnderline] {
+            rects.push(line.rect(
+                size,
+                metrics.descent,
+                metrics.underline_position,
+                metrics.underline_thickness,
+                RectStyle::Solid,
+            ));
+        }
+
+        // Double underline.
+        {
+            // Position underlines so each one has 50% of descent available.
+            let top_pos = 0.25 * metrics.descent;
+            let bottom_pos = 0.75 * metrics.descent;
+            for line in &self.inner[LineKind::DoubleUnderline] {
+                rects.push(line.rect(
+                    size,
+                    metrics.descent,
+                    top_pos,
+                    metrics.underline_thickness,
+                    RectStyle::Solid,
+                ));
+                rects.push(line.rect(
+                    size,
+                    metrics.descent,
+                    bottom_pos,
+                    metrics.underline_thickness,
+                    RectStyle::Solid,
+                ));
+            }
+        }
+
+        // Dotted underline.
+        {
+            // The dash width (half period) must be at least 1px and should be multiple
+            // of px, or it will be visually inconsistent.
+            let period = metrics.underline_thickness.round().max(1.) * 2.;
+            for line in &self.inner[LineKind::DottedUnderline] {
+                rects.push(line.rect(
+                    size,
+                    metrics.descent,
+                    metrics.underline_position,
+                    metrics.underline_thickness,
+                    RectStyle::Dashed { period },
+                ));
+            }
+        }
+
+        // Dashed underline.
+        {
+            let dash_width = size.cell_width() / (DASH_PERIODS_PER_CELL * 2.);
+            // Same reason as DOTTED_UNDERLINE. But this should at least longer than it.
+            let period = dash_width.round().max(2.) * 2.;
+            for line in &self.inner[LineKind::DashedUnderline] {
+                rects.push(line.rect(
+                    size,
+                    metrics.descent,
+                    metrics.underline_position,
+                    metrics.underline_thickness,
+                    RectStyle::Dashed { period },
+                ));
+            }
+        }
+
+        rects
     }
 
     /// Update the stored lines with the next cell info.
     #[inline]
     pub fn update(&mut self, cell: &RenderableCell) {
-        self.update_flag(cell, Flags::UNDERLINE);
-        self.update_flag(cell, Flags::DOUBLE_UNDERLINE);
-        self.update_flag(cell, Flags::STRIKEOUT);
-        self.update_flag(cell, Flags::DOTTED_UNDERLINE);
-        self.update_flag(cell, Flags::DASHED_UNDERLINE);
+        self.update_kind(cell, LineKind::StrikeOut, Flags::STRIKEOUT);
+        self.update_kind(cell, LineKind::SingleUnderline, Flags::UNDERLINE);
+        self.update_kind(cell, LineKind::DoubleUnderline, Flags::DOUBLE_UNDERLINE);
+        self.update_kind(cell, LineKind::DottedUnderline, Flags::DOTTED_UNDERLINE);
+        self.update_kind(cell, LineKind::DashedUnderline, Flags::DASHED_UNDERLINE);
     }
 
-    /// Update the lines for a specific flag.
-    fn update_flag(&mut self, cell: &RenderableCell, flag: Flags) {
+    /// Update the lines for a specific kind.
+    fn update_kind(&mut self, cell: &RenderableCell, kind: LineKind, flag: Flags) {
         if !cell.flags.contains(flag) {
             return;
         }
@@ -199,8 +231,10 @@ impl RenderLines {
             end.column += 1;
         }
 
+        let lines = &mut self.inner[kind];
+
         // Check if there's an active line.
-        if let Some(line) = self.inner.get_mut(&flag).and_then(|lines| lines.last_mut()) {
+        if let Some(line) = lines.last_mut() {
             if cell.fg == line.color
                 && cell.point.column == line.end.column + 1
                 && cell.point.line == line.end.line
@@ -212,13 +246,7 @@ impl RenderLines {
         }
 
         // Start new line if there currently is none.
-        let line = RenderLine { start: cell.point, end, color: cell.fg };
-        match self.inner.get_mut(&flag) {
-            Some(lines) => lines.push(line),
-            None => {
-                self.inner.insert(flag, vec![line]);
-            },
-        }
+        lines.push(RenderLine { start: cell.point, end, color: cell.fg });
     }
 }
 
