@@ -34,6 +34,8 @@ libc = "0.2"
 unicode-width = "0.1"
 bitflags = "1"
 dirs = "3.0.1"
+cstr = "0.2.8"
+thiserror = "1.0.29"
 
 [build-dependencies]
 gl_generator = "0.14.0"
