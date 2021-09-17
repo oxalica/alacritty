@@ -18,22 +18,25 @@ uniform float underlinePosition;
 uniform float underlineThickness;
 
 #define STRIKEOUT 4
-#define UNDERLINE 8
-#define DOUBLE_UNDERLINE 16
+
+#define UNDERLINE_MASK   070
+#define SINGLE_UNDERLINE 010
+#define DOUBLE_UNDERLINE 020
+#define DOTTED_UNDERLINE 030
+#define DASHED_UNDERLINE 040
 
 void main()
 {
     int flags = int(fg.a);
+    int underlineFlag = flags & UNDERLINE_MASK;
 
     float strikeoutBottom = -decent + strikeoutPosition - 0.5 * strikeoutThickness;
     bool inStrikeout =
-        (flags & STRIKEOUT) != 0 &&
         strikeoutBottom <= cellRelativePosition.y &&
         cellRelativePosition.y <= strikeoutBottom + strikeoutThickness;
 
     float underlineBottom = -decent + underlinePosition - 0.5 * underlineThickness;
-    bool inUnderline =
-        (flags & UNDERLINE) != 0 &&
+    bool inSingleUnderline =
         underlineBottom <= cellRelativePosition.y &&
         cellRelativePosition.y <= underlineBottom + underlineThickness;
 
@@ -41,13 +44,27 @@ void main()
     float doubleUnderlineBottom1 = -decent + decent * 0.25 - 0.5 * underlineThickness;
     float doubleUnderlineBottom2 = -decent + decent * 0.75 - 0.5 * underlineThickness;
     bool inDoubleUnderline =
-        (flags & DOUBLE_UNDERLINE) != 0 &&
         ((doubleUnderlineBottom1 <= cellRelativePosition.y &&
         cellRelativePosition.y <= doubleUnderlineBottom1 + underlineThickness) ||
         (doubleUnderlineBottom2 <= cellRelativePosition.y &&
         cellRelativePosition.y <= doubleUnderlineBottom2 + underlineThickness));
 
-    bool shouldUseFg = inUnderline || inStrikeout || inDoubleUnderline;
+    bool inDottedUnderline =
+        inSingleUnderline &&
+        fract(cellRelativePosition.x / (underlineThickness * 2.)) <= 0.5;
+
+    // Dash starts from 1/4 period for symmetry.
+    float dashPosition = fract(cellRelativePosition.x / cellDim.x);
+    bool inDashedUnderline =
+        inSingleUnderline &&
+        (dashPosition <= 0.25 || dashPosition >= 0.75);
+
+    bool shouldUseFg =
+        (flags & STRIKEOUT) != 0 && inStrikeout ||
+        underlineFlag == SINGLE_UNDERLINE && inSingleUnderline ||
+        underlineFlag == DOUBLE_UNDERLINE && inDoubleUnderline ||
+        underlineFlag == DOTTED_UNDERLINE && inDottedUnderline ||
+        underlineFlag == DASHED_UNDERLINE && inDashedUnderline;
 
     FragColor = vec4(mix(bg.rgb, fg.rgb, float(shouldUseFg)), 1.0);
     FragAlphaMask = vec4(1.0);

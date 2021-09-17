@@ -361,8 +361,13 @@ bitflags! {
         const WIDE_CHAR        = 0b0000_0001;
         const COLORED          = 0b0000_0010;
         const STRIKEOUT        = 0b0000_0100;
-        const UNDERLINE        = 0b0000_1000;
+
+        // Only one underline style can be set at once.
+        const UNDERLINE_MASK   = 0b0011_1000;
+        const SINGLE_UNDERLINE = 0b0000_1000;
         const DOUBLE_UNDERLINE = 0b0001_0000;
+        const DOTTED_UNDERLINE = 0b0001_1000;
+        const DASHED_UNDERLINE = 0b0010_0000;
     }
 }
 
@@ -458,11 +463,15 @@ impl Batch {
         cell_flags.set(RenderingGlyphFlags::COLORED, glyph.multicolor);
         cell_flags.set(RenderingGlyphFlags::WIDE_CHAR, cell.flags.contains(Flags::WIDE_CHAR));
         cell_flags.set(RenderingGlyphFlags::STRIKEOUT, cell.flags.contains(Flags::STRIKEOUT));
-        cell_flags.set(RenderingGlyphFlags::UNDERLINE, cell.flags.contains(Flags::UNDERLINE));
-        cell_flags.set(
-            RenderingGlyphFlags::DOUBLE_UNDERLINE,
-            cell.flags.contains(Flags::DOUBLE_UNDERLINE),
-        );
+
+        // Underline flags never overlap.
+        match cell.flags & Flags::ALL_UNDERLINE {
+            Flags::UNDERLINE => cell_flags.insert(RenderingGlyphFlags::SINGLE_UNDERLINE),
+            Flags::DOUBLE_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::DOUBLE_UNDERLINE),
+            Flags::DOTTED_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::DOTTED_UNDERLINE),
+            Flags::DASHED_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::DASHED_UNDERLINE),
+            _ => {},
+        }
 
         self.instances.push(InstanceData {
             col: cell.point.column.0 as u16,
