@@ -24,6 +24,9 @@ uniform float underlineThickness;
 #define DOUBLE_UNDERLINE 020
 #define DOTTED_UNDERLINE 030
 #define DASHED_UNDERLINE 040
+#define CURLY_UNDERLINE  050
+
+#define TAU 6.28318530717958647692528676655900577
 
 void main()
 {
@@ -41,8 +44,8 @@ void main()
         cellRelativePosition.y <= underlineBottom + underlineThickness;
 
     // Position underlines so each one has 50% of descent available.
-    float doubleUnderlineBottom1 = -decent + decent * 0.25 - 0.5 * underlineThickness;
-    float doubleUnderlineBottom2 = -decent + decent * 0.75 - 0.5 * underlineThickness;
+    float doubleUnderlineBottom1 = -decent + decent * 0.75 - 0.5 * underlineThickness;
+    float doubleUnderlineBottom2 = -decent + decent * 0.25 - 0.5 * underlineThickness;
     bool inDoubleUnderline =
         ((doubleUnderlineBottom1 <= cellRelativePosition.y &&
         cellRelativePosition.y <= doubleUnderlineBottom1 + underlineThickness) ||
@@ -59,12 +62,19 @@ void main()
         inSingleUnderline &&
         (dashPosition <= 0.25 || dashPosition >= 0.75);
 
+    float curlyAmplify = (doubleUnderlineBottom2 - doubleUnderlineBottom1) / 2.;
+    float curlyY = doubleUnderlineBottom1 + curlyAmplify * (sin(cellRelativePosition.x / cellDim.x * TAU) + 1.);
+    bool inCurlyUnderline =
+        curlyY <= cellRelativePosition.y &&
+        cellRelativePosition.y <= curlyY + underlineThickness;
+
     bool shouldUseFg =
         (flags & STRIKEOUT) != 0 && inStrikeout ||
         underlineFlag == SINGLE_UNDERLINE && inSingleUnderline ||
         underlineFlag == DOUBLE_UNDERLINE && inDoubleUnderline ||
         underlineFlag == DOTTED_UNDERLINE && inDottedUnderline ||
-        underlineFlag == DASHED_UNDERLINE && inDashedUnderline;
+        underlineFlag == DASHED_UNDERLINE && inDashedUnderline ||
+        underlineFlag == CURLY_UNDERLINE  && inCurlyUnderline;
 
     FragColor = vec4(mix(bg.rgb, fg.rgb, float(shouldUseFg)), 1.0);
     FragAlphaMask = vec4(1.0);

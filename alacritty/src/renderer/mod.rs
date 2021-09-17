@@ -368,6 +368,7 @@ bitflags! {
         const DOUBLE_UNDERLINE = 0b0001_0000;
         const DOTTED_UNDERLINE = 0b0001_1000;
         const DASHED_UNDERLINE = 0b0010_0000;
+        const CURLY_UNDERLINE  = 0b0010_1000;
     }
 }
 
@@ -470,6 +471,7 @@ impl Batch {
             Flags::DOUBLE_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::DOUBLE_UNDERLINE),
             Flags::DOTTED_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::DOTTED_UNDERLINE),
             Flags::DASHED_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::DASHED_UNDERLINE),
+            Flags::CURLY_UNDERLINE => cell_flags.insert(RenderingGlyphFlags::CURLY_UNDERLINE),
             _ => {},
         }
 
