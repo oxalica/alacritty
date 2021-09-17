@@ -64,11 +64,6 @@ pub struct TextShaderProgram {
 
     /// Cell dimensions (pixels).
     u_cell_dim: GLint,
-
-    /// Background pass flag.
-    ///
-    /// Rendering is split into two passes; 1 for backgrounds, and one for text.
-    u_background: GLint,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -408,7 +403,8 @@ struct InstanceData {
 
 #[derive(Debug)]
 pub struct QuadRenderer {
-    program: TextShaderProgram,
+    text_program: TextShaderProgram,
+    decoration_program: DecorationShaderProgram,
     vao: GLuint,
     ebo: GLuint,
     vbo_instance: GLuint,
@@ -426,7 +422,8 @@ pub struct RenderApi<'a> {
     batch: &'a mut Batch,
     atlas: &'a mut Vec<Atlas>,
     current_atlas: &'a mut usize,
-    program: &'a mut TextShaderProgram,
+    text_program: &'a mut TextShaderProgram,
+    decoration_program: &'a mut DecorationShaderProgram,
     config: &'a UiConfig,
 }
 
@@ -615,7 +612,8 @@ impl QuadRenderer {
         }
 
         let mut renderer = Self {
-            program,
+            text_program: program,
+            decoration_program: DecorationShaderProgram::new()?,
             rect_renderer: RectRenderer::new()?,
             vao,
             ebo,
@@ -666,8 +664,11 @@ impl QuadRenderer {
         F: FnOnce(RenderApi<'_>) -> T,
     {
         unsafe {
-            gl::UseProgram(self.program.id());
-            self.program.set_term_uniforms(props);
+            gl::UseProgram(self.text_program.id());
+            self.text_program.set_term_uniforms(props);
+            gl::UseProgram(self.decoration_program.id());
+            self.decoration_program.set_term_uniforms(props);
+            gl::UseProgram(0);
 
             gl::BindVertexArray(self.vao);
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, self.ebo);
@@ -680,7 +681,8 @@ impl QuadRenderer {
             batch: &mut self.batch,
             atlas: &mut self.atlas,
             current_atlas: &mut self.current_atlas,
-            program: &mut self.program,
+            text_program: &mut self.text_program,
+            decoration_program: &mut self.decoration_program,
             config,
         });
 
@@ -688,8 +690,6 @@ impl QuadRenderer {
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, 0);
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
             gl::BindVertexArray(0);
-
-            gl::UseProgram(0);
         }
 
         res
@@ -721,13 +721,10 @@ impl QuadRenderer {
             );
 
             // Update projection.
-            gl::UseProgram(self.program.id());
-            self.program.update_projection(
-                size.width(),
-                size.height(),
-                size.padding_x(),
-                size.padding_y(),
-            );
+            gl::UseProgram(self.text_program.id());
+            self.text_program.update_projection(size);
+            gl::UseProgram(self.decoration_program.id());
+            self.decoration_program.update_projection(size);
             gl::UseProgram(0);
         }
     }
@@ -783,7 +780,8 @@ impl<'a> RenderApi<'a> {
         }
 
         unsafe {
-            self.program.set_background_pass(true);
+            // Decoration shader goes first cause it renders background color.
+            gl::UseProgram(self.decoration_program.id());
             gl::DrawElementsInstanced(
                 gl::TRIANGLES,
                 6,
@@ -791,7 +789,9 @@ impl<'a> RenderApi<'a> {
                 ptr::null(),
                 self.batch.len() as GLsizei,
             );
-            self.program.set_background_pass(false);
+
+            // Then render texts.
+            gl::UseProgram(self.text_program.id());
             gl::DrawElementsInstanced(
                 gl::TRIANGLES,
                 6,
@@ -799,6 +799,8 @@ impl<'a> RenderApi<'a> {
                 ptr::null(),
                 self.batch.len() as GLsizei,
             );
+
+            gl::UseProgram(0);
         }
 
         self.batch.clear();
@@ -961,7 +963,6 @@ impl TextShaderProgram {
         Ok(Self {
             u_projection: program.get_uniform_location(cstr!("projection"))?,
             u_cell_dim: program.get_uniform_location(cstr!("cellDim"))?,
-            u_background: program.get_uniform_location(cstr!("backgroundPass"))?,
             program,
         })
     }
@@ -970,7 +971,10 @@ impl TextShaderProgram {
         self.program.id()
     }
 
-    fn update_projection(&self, width: f32, height: f32, padding_x: f32, padding_y: f32) {
+    fn update_projection(&self, size: &SizeInfo) {
+        let (width, height, padding_x, padding_y) =
+            (size.width(), size.height(), size.padding_x(), size.padding_y());
+
         // Bounds check.
         if (width as u32) < (2 * padding_x as u32) || (height as u32) < (2 * padding_y as u32) {
             return;
@@ -994,12 +998,57 @@ impl TextShaderProgram {
             gl::Uniform2f(self.u_cell_dim, props.cell_width(), props.cell_height());
         }
     }
+}
 
-    fn set_background_pass(&self, background_pass: bool) {
-        let value = if background_pass { 1 } else { 0 };
+#[derive(Debug)]
+struct DecorationShaderProgram {
+    program: ShaderProgram,
+    u_projection: GLint,
+    u_cell_dim: GLint,
+}
+
+impl DecorationShaderProgram {
+    fn new() -> Result<Self, Error> {
+        static VERTEX: &str = include_str!("../../res/decoration.v.glsl");
+        static FRAGMENT: &str = include_str!("../../res/decoration.f.glsl");
+
+        let program = ShaderProgram::new(VERTEX, FRAGMENT)?;
+        Ok(Self {
+            u_projection: program.get_uniform_location(cstr!("projection"))?,
+            u_cell_dim: program.get_uniform_location(cstr!("cellDim"))?,
+            program,
+        })
+    }
+
+    fn id(&self) -> GLuint {
+        self.program.id()
+    }
+
+    fn update_projection(&self, size: &SizeInfo) {
+        let (width, height, padding_x, padding_y) =
+            (size.width(), size.height(), size.padding_x(), size.padding_y());
+
+        // Bounds check.
+        if (width as u32) < (2 * padding_x as u32) || (height as u32) < (2 * padding_y as u32) {
+            return;
+        }
+
+        // Compute scale and offset factors, from pixel to ndc space. Y is inverted.
+        //   [0, width - 2 * padding_x] to [-1, 1]
+        //   [height - 2 * padding_y, 0] to [-1, 1]
+        let scale_x = 2. / (width - 2. * padding_x);
+        let scale_y = -2. / (height - 2. * padding_y);
+        let offset_x = -1.;
+        let offset_y = 1.;
 
         unsafe {
-            gl::Uniform1i(self.u_background, value);
+            gl::Uniform4f(self.u_projection, offset_x, offset_y, scale_x, scale_y);
+        }
+    }
+
+    fn set_term_uniforms(&self, props: &SizeInfo) {
+        unsafe {
+            gl::Uniform2f(self.u_cell_dim, props.cell_width(), props.cell_height());
         }
     }
 }

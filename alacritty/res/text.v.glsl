@@ -24,8 +24,6 @@ flat out vec4 bg;
 uniform vec2 cellDim;
 uniform vec4 projection;
 
-uniform int backgroundPass;
-
 #define WIDE_CHAR 1
 
 void main() {
@@ -40,30 +38,17 @@ void main() {
     // Position of cell from top-left
     vec2 cellPosition = cellDim * gridCoords;
 
-    if (backgroundPass != 0) {
-        vec2 backgroundDim = cellDim;
-        if ((int(textColor.a) & WIDE_CHAR) != 0) {
-            // Update wide char x dimension so it'll cover the following spacer.
-            backgroundDim.x *= 2;
-        }
-        vec2 finalPosition = cellPosition + backgroundDim * position;
-        gl_Position =
-            vec4(projectionOffset + projectionScale * finalPosition, 0.0, 1.0);
+    vec2 glyphSize = glyph.zw;
+    vec2 glyphOffset = glyph.xy;
+    glyphOffset.y = cellDim.y - glyphOffset.y;
 
-        TexCoords = vec2(0, 0);
-    } else {
-        vec2 glyphSize = glyph.zw;
-        vec2 glyphOffset = glyph.xy;
-        glyphOffset.y = cellDim.y - glyphOffset.y;
+    vec2 finalPosition = cellPosition + glyphSize * position + glyphOffset;
+    gl_Position =
+        vec4(projectionOffset + projectionScale * finalPosition, 0.0, 1.0);
 
-        vec2 finalPosition = cellPosition + glyphSize * position + glyphOffset;
-        gl_Position =
-            vec4(projectionOffset + projectionScale * finalPosition, 0.0, 1.0);
-
-        vec2 uvOffset = uv.xy;
-        vec2 uvSize = uv.zw;
-        TexCoords = uvOffset + position * uvSize;
-    }
+    vec2 uvOffset = uv.xy;
+    vec2 uvSize = uv.zw;
+    TexCoords = uvOffset + position * uvSize;
 
     bg = backgroundColor / 255.0;
     fg = vec4(textColor.rgb / 255.0, textColor.a);
