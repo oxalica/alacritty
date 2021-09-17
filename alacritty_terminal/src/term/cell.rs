@@ -26,7 +26,8 @@ bitflags! {
         const DOUBLE_UNDERLINE          = 0b0000_1000_0000_0000;
         const DOTTED_UNDERLINE          = 0b0001_0000_0000_0000;
         const DASHED_UNDERLINE          = 0b0010_0000_0000_0000;
-        const ALL_UNDERLINE             = 0b0011_1000_0000_1000;
+        const CURLY_UNDERLINE           = 0b0100_0000_0000_0000;
+        const ALL_UNDERLINE             = 0b0111_1000_0000_1000;
     }
 }
 

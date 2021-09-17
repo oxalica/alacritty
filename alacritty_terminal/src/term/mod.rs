@@ -1523,6 +1523,10 @@ impl<T: EventListener> Handler for Term<T> {
                 cursor.template.flags.remove(Flags::ALL_UNDERLINE);
                 cursor.template.flags.insert(Flags::DASHED_UNDERLINE);
             },
+            Attr::CurlyUnderline => {
+                cursor.template.flags.remove(Flags::ALL_UNDERLINE);
+                cursor.template.flags.insert(Flags::CURLY_UNDERLINE);
+            },
             Attr::CancelUnderline => {
                 cursor.template.flags.remove(Flags::ALL_UNDERLINE);
             },
