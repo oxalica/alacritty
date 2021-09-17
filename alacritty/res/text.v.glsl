@@ -24,8 +24,6 @@ flat out vec4 bg;
 uniform vec2 cellDim;
 uniform vec4 projection;
 
-#define WIDE_CHAR 1
-
 void main() {
     vec2 projectionOffset = projection.xy;
     vec2 projectionScale = projection.zw;

@@ -5,7 +5,7 @@ use std::ptr;
 
 use bitflags::bitflags;
 use crossfont::{
-    BitmapBuffer, Error as RasterizerError, FontDesc, FontKey, GlyphKey, Rasterize,
+    BitmapBuffer, Error as RasterizerError, FontDesc, FontKey, GlyphKey, Metrics, Rasterize,
     RasterizedGlyph, Rasterizer, Size, Slant, Style, Weight,
 };
 use cstr::cstr;
@@ -358,8 +358,11 @@ impl GlyphCache {
 bitflags! {
     #[repr(C)]
     struct RenderingGlyphFlags: u8 {
-        const WIDE_CHAR = 0b0000_0001;
-        const COLORED   = 0b0000_0010;
+        const WIDE_CHAR        = 0b0000_0001;
+        const COLORED          = 0b0000_0010;
+        const STRIKEOUT        = 0b0000_0100;
+        const UNDERLINE        = 0b0000_1000;
+        const DOUBLE_UNDERLINE = 0b0001_0000;
     }
 }
 
@@ -454,6 +457,12 @@ impl Batch {
         let mut cell_flags = RenderingGlyphFlags::empty();
         cell_flags.set(RenderingGlyphFlags::COLORED, glyph.multicolor);
         cell_flags.set(RenderingGlyphFlags::WIDE_CHAR, cell.flags.contains(Flags::WIDE_CHAR));
+        cell_flags.set(RenderingGlyphFlags::STRIKEOUT, cell.flags.contains(Flags::STRIKEOUT));
+        cell_flags.set(RenderingGlyphFlags::UNDERLINE, cell.flags.contains(Flags::UNDERLINE));
+        cell_flags.set(
+            RenderingGlyphFlags::DOUBLE_UNDERLINE,
+            cell.flags.contains(Flags::DOUBLE_UNDERLINE),
+        );
 
         self.instances.push(InstanceData {
             col: cell.point.column.0 as u16,
@@ -659,7 +668,13 @@ impl QuadRenderer {
         }
     }
 
-    pub fn with_api<F, T>(&mut self, config: &UiConfig, props: &SizeInfo, func: F) -> T
+    pub fn with_api<F, T>(
+        &mut self,
+        config: &UiConfig,
+        props: &SizeInfo,
+        metrics: &Metrics,
+        func: F,
+    ) -> T
     where
         F: FnOnce(RenderApi<'_>) -> T,
     {
@@ -668,6 +683,7 @@ impl QuadRenderer {
             self.text_program.set_term_uniforms(props);
             gl::UseProgram(self.decoration_program.id());
             self.decoration_program.set_term_uniforms(props);
+            self.decoration_program.update_metics(metrics);
             gl::UseProgram(0);
 
             gl::BindVertexArray(self.vao);
@@ -1003,8 +1019,17 @@ impl TextShaderProgram {
 #[derive(Debug)]
 struct DecorationShaderProgram {
     program: ShaderProgram,
+
+    // Terminal props.
     u_projection: GLint,
     u_cell_dim: GLint,
+
+    // Metrics.
+    u_decent: GLint,
+    u_strikeout_position: GLint,
+    u_strikeout_thickness: GLint,
+    u_underline_position: GLint,
+    u_underline_thickness: GLint,
 }
 
 impl DecorationShaderProgram {
@@ -1016,6 +1041,11 @@ impl DecorationShaderProgram {
         Ok(Self {
             u_projection: program.get_uniform_location(cstr!("projection"))?,
             u_cell_dim: program.get_uniform_location(cstr!("cellDim"))?,
+            u_decent: program.get_uniform_location(cstr!("decent"))?,
+            u_strikeout_position: program.get_uniform_location(cstr!("strikeoutPosition"))?,
+            u_strikeout_thickness: program.get_uniform_location(cstr!("strikeoutThickness"))?,
+            u_underline_position: program.get_uniform_location(cstr!("underlinePosition"))?,
+            u_underline_thickness: program.get_uniform_location(cstr!("underlineThickness"))?,
             program,
         })
     }
@@ -1049,6 +1079,20 @@ impl DecorationShaderProgram {
     fn set_term_uniforms(&self, props: &SizeInfo) {
         unsafe {
             gl::Uniform2f(self.u_cell_dim, props.cell_width(), props.cell_height());
+        }
+    }
+
+    fn update_metics(&self, metrics: &Metrics) {
+        // Line bottom offset relative to the cell bottom in pixel, with origin on left-top.
+        // So this is non-nagative.
+        unsafe {
+            gl::Uniform1f(self.u_decent, metrics.descent);
+
+            gl::Uniform1f(self.u_strikeout_position, metrics.strikeout_position);
+            gl::Uniform1f(self.u_strikeout_thickness, metrics.strikeout_thickness.max(1.));
+
+            gl::Uniform1f(self.u_underline_position, metrics.underline_position);
+            gl::Uniform1f(self.u_underline_thickness, metrics.underline_thickness.max(1.));
         }
     }
 }

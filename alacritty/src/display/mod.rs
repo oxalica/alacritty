@@ -287,9 +287,11 @@ impl Display {
         // Update OpenGL projection.
         renderer.resize(&size_info);
 
+        let metrics = glyph_cache.font_metrics();
+
         // Clear screen.
         let background_color = config.ui_config.colors.primary.background;
-        renderer.with_api(&config.ui_config, &size_info, |api| {
+        renderer.with_api(&config.ui_config, &size_info, &metrics, |api| {
             api.clear(background_color);
         });
 
@@ -306,7 +308,7 @@ impl Display {
         #[cfg(not(any(target_os = "macos", windows)))]
         if is_x11 {
             window.swap_buffers();
-            renderer.with_api(&config.ui_config, &size_info, |api| {
+            renderer.with_api(&config.ui_config, &size_info, &metrics, |api| {
                 api.finish();
             });
         }
@@ -505,11 +507,9 @@ impl Display {
         // Drop terminal as early as possible to free lock.
         drop(terminal);
 
-        self.renderer.with_api(&config.ui_config, &size_info, |api| {
+        self.renderer.with_api(&config.ui_config, &size_info, &metrics, |api| {
             api.clear(background_color);
         });
-
-        let mut lines = RenderLines::new();
 
         // Draw grid.
         {
@@ -518,7 +518,7 @@ impl Display {
             let glyph_cache = &mut self.glyph_cache;
             let highlighted_hint = &self.highlighted_hint;
             let vi_highlighted_hint = &self.vi_highlighted_hint;
-            self.renderer.with_api(&config.ui_config, &size_info, |mut api| {
+            self.renderer.with_api(&config.ui_config, &size_info, &metrics, |mut api| {
                 // Iterate over all non-empty cells in the grid.
                 for mut cell in grid_cells {
                     // Underline hints hovered by mouse or vi mode cursor.
@@ -529,16 +529,13 @@ impl Display {
                         cell.flags.insert(Flags::UNDERLINE);
                     }
 
-                    // Update underline/strikeout.
-                    lines.update(&cell);
-
                     // Draw the cell.
                     api.render_cell(cell, glyph_cache);
                 }
             });
         }
 
-        let mut rects = lines.rects(&metrics, &size_info);
+        let mut rects = Vec::new();
 
         if let Some(vi_mode_cursor) = vi_mode_cursor {
             // Indicate vi mode by showing the cursor's position in the top right corner.
@@ -598,7 +595,7 @@ impl Display {
             let fg = config.ui_config.colors.primary.background;
             for (i, message_text) in text.iter().enumerate() {
                 let point = Point::new(start_line + i, Column(0));
-                self.renderer.with_api(&config.ui_config, &size_info, |mut api| {
+                self.renderer.with_api(&config.ui_config, &size_info, &metrics, |mut api| {
                     api.render_string(glyph_cache, point, fg, bg, message_text);
                 });
             }
@@ -644,7 +641,7 @@ impl Display {
             // On X11 `swap_buffers` does not block for vsync. However the next OpenGl command
             // will block to synchronize (this is `glClear` in Alacritty), which causes a
             // permanent one frame delay.
-            self.renderer.with_api(&config.ui_config, &size_info, |api| {
+            self.renderer.with_api(&config.ui_config, &size_info, &metrics, |api| {
                 api.finish();
             });
         }
@@ -748,9 +745,14 @@ impl Display {
         let fg = config.ui_config.colors.search_bar_foreground();
         let bg = config.ui_config.colors.search_bar_background();
 
-        self.renderer.with_api(&config.ui_config, size_info, |mut api| {
-            api.render_string(glyph_cache, point, fg, bg, &text);
-        });
+        self.renderer.with_api(
+            &config.ui_config,
+            size_info,
+            &glyph_cache.font_metrics(),
+            |mut api| {
+                api.render_string(glyph_cache, point, fg, bg, &text);
+            },
+        );
     }
 
     /// Draw render timer.
@@ -766,9 +768,14 @@ impl Display {
         let fg = config.ui_config.colors.primary.background;
         let bg = config.ui_config.colors.normal.red;
 
-        self.renderer.with_api(&config.ui_config, size_info, |mut api| {
-            api.render_string(glyph_cache, point, fg, bg, &timing);
-        });
+        self.renderer.with_api(
+            &config.ui_config,
+            size_info,
+            &glyph_cache.font_metrics(),
+            |mut api| {
+                api.render_string(glyph_cache, point, fg, bg, &timing);
+            },
+        );
     }
 
     /// Draw an indicator for the position of a line in history.
@@ -789,9 +796,14 @@ impl Display {
         // Do not render anything if it would obscure the vi mode cursor.
         if vi_mode_point.map_or(true, |point| point.line != 0 || point.column < column) {
             let glyph_cache = &mut self.glyph_cache;
-            self.renderer.with_api(&config.ui_config, size_info, |mut api| {
-                api.render_string(glyph_cache, Point::new(0, column), fg, bg, &text);
-            });
+            self.renderer.with_api(
+                &config.ui_config,
+                size_info,
+                &glyph_cache.font_metrics(),
+                |mut api| {
+                    api.render_string(glyph_cache, Point::new(0, column), fg, bg, &text);
+                },
+            );
         }
     }
 
