@@ -45,7 +45,7 @@ use crate::display::meter::Meter;
 use crate::display::window::Window;
 use crate::event::{Mouse, SearchState};
 use crate::message_bar::{MessageBuffer, MessageType};
-use crate::renderer::rects::{RenderLines, RenderRect};
+use crate::renderer::rects::RenderRect;
 use crate::renderer::{self, GlyphCache, QuadRenderer};
 
 pub mod content;
