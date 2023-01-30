@@ -10,3 +10,7 @@ members = [
 lto = true
 debug = 1
 incremental = false
+
+[patch.crates-io]
+glutin = { git = "https://github.com/oxalica/glutin.git", rev = "71d247799555c791cdee9e7b2abad31d8a1d1214" }
+winit = { git = "https://github.com/rust-windowing/winit", rev = "1b4045dcb291c88c5dbe0b739833cab95b3fe2eb" }

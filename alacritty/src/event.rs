@@ -26,7 +26,7 @@ use winit::event_loop::{
 };
 use winit::platform::run_return::EventLoopExtRunReturn;
 #[cfg(all(feature = "wayland", not(any(target_os = "macos", windows))))]
-use winit::platform::unix::EventLoopWindowTargetExtUnix;
+use winit::platform::wayland::EventLoopWindowTargetExtWayland;
 use winit::window::WindowId;
 
 use crossfont::{self, Size};
@@ -1288,7 +1288,10 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     | WindowEvent::ThemeChanged(_)
                     | WindowEvent::HoveredFile(_)
                     | WindowEvent::Touch(_)
-                    | WindowEvent::Moved(_) => (),
+                    | WindowEvent::Moved(_)
+                    | WindowEvent::TouchpadMagnify { .. }
+                    | WindowEvent::SmartMagnify { .. }
+                    | WindowEvent::TouchpadRotate { .. } => {},
                 }
             },
             WinitEvent::Suspended { .. }

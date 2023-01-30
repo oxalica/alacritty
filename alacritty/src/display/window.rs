@@ -1,12 +1,13 @@
 #[cfg(not(any(target_os = "macos", windows)))]
-use winit::platform::unix::{WindowBuilderExtUnix, WindowExtUnix};
+use winit::platform::x11::{WindowBuilderExtX11, WindowExtX11};
 
 #[rustfmt::skip]
 #[cfg(all(feature = "wayland", not(any(target_os = "macos", windows))))]
 use {
     wayland_client::protocol::wl_surface::WlSurface,
     wayland_client::{Attached, EventQueue, Proxy},
-    winit::platform::unix::EventLoopWindowTargetExtUnix,
+    winit::platform::wayland::EventLoopWindowTargetExtWayland,
+    winit::platform::wayland::WindowExtWayland,
     winit::window::Theme,
 };
 
@@ -282,28 +283,20 @@ impl Window {
             .with_transparent(true)
             .with_decorations(window_config.decorations != Decorations::None)
             .with_maximized(window_config.maximized())
-            .with_fullscreen(window_config.fullscreen());
+            .with_fullscreen(window_config.fullscreen())
+            .with_theme(match window_config.decorations_theme_variant() {
+                Some("dark") => Some(Theme::Dark),
+                Some("light") => Some(Theme::Light),
+                _ => None,
+            });
 
         #[cfg(feature = "x11")]
         let builder = builder.with_window_icon(Some(icon));
 
         #[cfg(feature = "x11")]
-        let builder = match window_config.decorations_theme_variant() {
-            Some(val) => builder.with_gtk_theme_variant(val.to_string()),
-            None => builder,
-        };
-
-        #[cfg(feature = "x11")]
         let builder = match x11_visual {
             Some(visual) => builder.with_x11_visual(visual.into_raw()),
             None => builder,
-        };
-
-        #[cfg(feature = "wayland")]
-        let builder = match window_config.decorations_theme_variant() {
-            Some("light") => builder.with_wayland_csd_theme(Theme::Light),
-            // Prefer dark theme by default, since default alacritty theme is dark.
-            _ => builder.with_wayland_csd_theme(Theme::Dark),
         };
 
         builder
